@@ -1,0 +1,3 @@
+include README.md
+recursive-include buttersalt_ldap/templates *
+recursive-include buttersalt_ldap/static *
