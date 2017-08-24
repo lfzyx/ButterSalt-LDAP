@@ -2,3 +2,22 @@
 
 {% block title %}ButterSalt-LDAP{% endblock title %}
 
+{% block page_content %}
+
+<table class="table table-striped">
+<thead>
+<tr>
+    <th>LDAP</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+
+    <td>  {{ Data|replace("\n", "<br>")|replace(" ","&nbsp;")|safe}} </td>
+
+</tr>
+</tbody>
+
+</table>
+{% endblock page_content %}
