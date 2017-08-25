@@ -1,7 +1,10 @@
 import json
-from flask import Blueprint, render_template
+import os
+import hashlib
+from base64 import encodebytes
+from flask import Blueprint, render_template, current_app
 from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, PasswordField, BooleanField, ValidationError
+from wtforms import StringField, SubmitField, PasswordField
 from wtforms.validators import InputRequired, Length, Email, Regexp, EqualTo
 from flask_login import login_required
 from ButterSalt import salt
@@ -27,15 +30,43 @@ __blueprint__ = ldap
 @ldap.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
-    _temp=salt.execution_command_low(tgt='devops-2',fun='ldap3.search',
-                                     args=[{'bind': {'password': '123456', 'method': 'simple', 'dn': 'cn=admin,dc=nodomain'},'url': 'ldap://192.168.2.81:389'}],
-                                     kwargs={'base': 'dc=nodomain', })
-    pretty = json.dumps(_temp, indent=4)
+    ldapstruct = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.search',
+                                            args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
+                                                            'method': 'simple',
+                                                            'dn': current_app.config.get('LDAP_BINDDN')},
+                                                   'url': 'ldap://127.0.0.1:389'}],
+                                            kwargs={'base': current_app.config.get('LDAP_BASEDN'), })
+    pretty = json.dumps(ldapstruct, indent=4)
     return render_template('ldap/index.html', Data=pretty)
 
 
-@ldap.route('/add/')
+@ldap.route('/signup/', methods=['GET', 'POST'])
 @login_required
-def add():
+def signup():
+    """ salt.modules.ldap3.add
+
+    """
     form = LdapAccount()
+    if form.validate_on_submit():
+        def makessha(password):
+            salt = os.urandom(4)
+            h = hashlib.sha1(password.encode())
+            h.update(salt)
+            return "{SSHA}" + encodebytes(h.digest() + salt).decode()[:-1]
+        cn = form.cn.data
+        ou = form.ou.data
+        mail = form.mail.data
+        userpassword = makessha(form.userPassword0.data)
+        salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.add',
+                                   args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
+                                                   'method': 'simple',
+                                                   'dn': current_app.config.get('LDAP_BINDDN')},
+                                          'url': 'ldap://127.0.0.1:389'}, ],
+                                   kwargs={'dn': 'cn=%s,ou=%s,dc=nodomain' % (cn, ou),
+                                           'attributes': {'userPassword':  [userpassword],
+                                                          'sn': [cn], 'mail': [mail],
+                                                          'ou': [ou], 'objectClass': ['inetOrgPerson',
+                                                                                      'organizationalPerson',
+                                                                                      'person',
+                                                                                      'top']}})
     return render_template('ldap/signup.html', form=form)
