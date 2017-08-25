@@ -3,17 +3,28 @@
 {% block title %}ButterSalt-LDAP{% endblock title %}
 
 {% block page_content %}
-<a class="btn btn-default" href="ldap/signup/" role="button"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> 注册 LDAP 账户</a>
+
+<a class="btn btn-default" href="signup" role="button"><span class="glyphicon glyphicon-plus" aria-hidden="true"></span> 注册 LDAP 账户</a>
+
 <table class="table table-striped">
 <thead>
 <tr>
-    <th>LDAP</th>
+    <th>姓名</th>
+    <th>部门</th>
+    <th>Email</th>
 </tr>
 </thead>
+
 <tbody>
+{% for n in Data %}
 <tr>
-    <td>  {{ Data|replace("\n", "<br>")|replace(" ","&nbsp;")|safe}} </td>
+
+    <td> <a href="{{ url_for('ldap.account_detail', name=Data.get(n).get('cn')[0])}}">{{Data.get(n).get('cn')[0]}} </a> </td>
+    <td> {{Data.get(n).get('ou')[0]}} </td>
+    <td> {{Data.get(n).get('mail')[0]}} </td>
 </tr>
+{% endfor %}
 </tbody>
+
 </table>
 {% endblock page_content %}
