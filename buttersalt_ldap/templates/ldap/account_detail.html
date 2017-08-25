@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "bootstrap/wtf.html" as wtf %}
+
+{% block title %}ButterSalt-LDAP{% endblock title %}
+
+{% block page_content %}
+{% if sshkey %}
+{{sshkey[0]}}
+{% else %}
+<p> 添加 ssh key 以开通主机登陆权限 </p>
+{{ wtf.quick_form(form) }}
+{% endif %}
+{% endblock page_content%}
