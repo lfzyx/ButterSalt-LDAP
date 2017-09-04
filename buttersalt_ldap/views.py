@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import yaml
 from base64 import encodebytes
 from flask import Blueprint, render_template, current_app, flash, redirect, url_for
 from flask_wtf import FlaskForm
@@ -29,8 +30,7 @@ class LdapAccount(FlaskForm):
 
 
 class MinionAccess(FlaskForm):
-    minion = SelectMultipleField('主机登陆授权', option_widget=widgets.CheckboxInput(),
-                                 widget=widgets.ListWidget(prefix_label=False))
+    minion = SelectMultipleField('主机登陆授权')
     submit = SubmitField('提交')
 
 
@@ -92,12 +92,53 @@ def signup():
 @ldap.route('/account/<name>', methods=['GET', 'POST'])
 @login_required
 def account_detail(name):
+    minion_list = json.loads(salt.get_accepted_keys())
+    form_choices_list = list()
+    for n in minion_list:
+        form_choices_list.append((n, n))
+
+    belong_minion_list = list()
+    for minion in minion_list:
+        text = salt.read_pillar_file('user/%s.sls' % (minion)).get('return')[0].get(
+            '/srv/pillar/user/%s.sls' % (minion))
+        text2yaml = yaml.load(text)
+        if name in text2yaml.get('users'):
+            belong_minion_list.append(minion)
+    MinionAccess.minion = SelectMultipleField('主机登陆授权', option_widget=widgets.CheckboxInput(),
+                                 widget=widgets.ListWidget(prefix_label=False), choices=form_choices_list, default=belong_minion_list)
     form = MinionAccess()
-    tgt_list = salt.get_accepted_keys()
-    _list = list()
-    for n in json.loads(tgt_list):
-        _list.append((n, n))
-    form.minion.choices = _list
+
     if form.validate_on_submit():
-        print(form.minion.data)
-    return render_template('ldap/account_detail.html', form = form)
+        minion_absent_list = set(minion_list)-set(form.minion.data)
+        for minion_absent in minion_absent_list:
+            text = salt.read_pillar_file('user/%s.sls' % (minion_absent,)).get('return')[0].get(
+                '/srv/pillar/user/%s.sls' % (minion_absent,))
+            text2yaml = yaml.load(text)
+            if name in text2yaml.get('users'):
+                text2yaml.get('users').pop(name)
+                yaml2text = yaml.dump(text2yaml)
+                salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion_absent,))
+                salt.execution_command_low(tgt=minion_absent, fun='user.delete',args=[name])
+
+        for minion in form.minion.data:
+            text= salt.read_pillar_file('user/%s.sls' % (minion,)).get('return')[0].get(
+                '/srv/pillar/user/%s.sls' % (minion,))
+            text2yaml = yaml.load(text)
+            account_ldap_data = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'),
+                                                           fun='ldap3.search',
+                                                           args=[{'bind': {'password': current_app.config.get(
+                                                               'LDAP_BINDPW'),
+                                                                'method': 'simple',
+                                                                'dn': current_app.config.get('LDAP_BINDDN')},
+                                                               'url': 'ldap://192.168.2.81:389'}],
+                                                           kwargs={'base': current_app.config.get('LDAP_BASEDN'),
+                                                                   'scope': 'subtree',
+                                                                   'filterstr': '(cn=%s)' % (name,), }).get(
+                current_app.config.get('LDAP_SERVER'))
+            cn = list(account_ldap_data.values())[0].get('cn')
+            ou = list(account_ldap_data.values())[0].get('ou')
+            text2yaml.get('users').update({name: {'shell': '/bin/bash', 'fullname': cn[0], 'name': cn[0], 'groups': ou}})
+            yaml2text = yaml.dump(text2yaml)
+            salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
+        salt.execution_command_minions(tgt='*',fun='state.apply', args='user')
+    return render_template('ldap/account_detail.html', form=form)
