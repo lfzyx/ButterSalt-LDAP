@@ -5,7 +5,7 @@ import yaml
 from base64 import encodebytes
 from flask import Blueprint, render_template, current_app, flash, redirect, url_for
 from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, PasswordField, TextAreaField, SelectMultipleField, widgets
+from wtforms import StringField, SubmitField, PasswordField, TextAreaField, SelectMultipleField, widgets, SelectField
 from wtforms.validators import InputRequired, Length, Email, Regexp, EqualTo, Optional
 from flask_login import login_required
 from ButterSalt import salt
@@ -15,7 +15,7 @@ class LdapAccount(FlaskForm):
     cn = StringField('姓名拼音', validators=[InputRequired('姓名拼音是必须的'), Length(1, 64),
                                          Regexp('^[A-Za-z]*$', 0,
                                                 '姓名拼音只能包含拼音')], render_kw={"placeholder": "zhangsan"})
-    ou = StringField('部门')
+    ou = SelectField('部门')
 
     o = StringField('组 (可填)', validators=[Optional()])
 
