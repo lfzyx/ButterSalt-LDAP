@@ -38,7 +38,6 @@ class MinionAccess(FlaskForm):
 
 
 ldap = Blueprint('ldap', __name__, url_prefix='/ldap', template_folder='templates')
-__blueprint__ = ldap
 
 
 @ldap.route('/', methods=['GET', 'POST'])
@@ -110,6 +109,32 @@ def signup():
 @ldap.route('/account/<name>', methods=['GET', 'POST'])
 @login_required
 def account_detail(name):
+    account = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.search',
+                                         args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
+                                                         'method': 'simple',
+                                                         'dn': current_app.config.get('LDAP_BINDDN')},
+                                                'url': 'ldap://127.0.0.1:389'}],
+                                         kwargs={'base': current_app.config.get('LDAP_BASEDN'),
+                                                 'scope': 'subtree',
+                                                 'filterstr': '(cn=%s)' % (name,), }).get(
+                current_app.config.get('LDAP_SERVER'))
+
+    minion_list = json.loads(salt.get_accepted_keys())
+    belong_minion_list = list()
+    for minion in minion_list:
+        text = salt.read_pillar_file('user/%s.sls' % (minion,)).get('return')[0].get(
+            '/srv/pillar/user/%s.sls' % (minion,))
+        text2yaml = yaml.load(text)
+        if name in text2yaml.get('users'):
+            belong_minion_list.append(minion)
+
+    return render_template('ldap/account_detail.html', Data=list(account.values()),
+                           belong_minion_list=belong_minion_list, minion_list=minion_list)
+
+
+@ldap.route('/account/<name>/edit', methods=['GET', 'POST'])
+@login_required
+def account_edit(name):
     minion_list = json.loads(salt.get_accepted_keys())
     form_choices_list = list()
     for n in minion_list:
@@ -128,7 +153,7 @@ def account_detail(name):
     form = MinionAccess()
 
     if form.validate_on_submit():
-        minion_absent_list = set(minion_list)-set(form.minion.data)
+        minion_absent_list = set(minion_list) - set(form.minion.data)
         for minion_absent in minion_absent_list:
             text = salt.read_pillar_file('user/%s.sls' % (minion_absent,)).get('return')[0].get(
                 '/srv/pillar/user/%s.sls' % (minion_absent,))
@@ -147,8 +172,8 @@ def account_detail(name):
                                                            fun='ldap3.search',
                                                            args=[{'bind': {'password': current_app.config.get(
                                                                'LDAP_BINDPW'),
-                                                                'method': 'simple',
-                                                                'dn': current_app.config.get('LDAP_BINDDN')},
+                                                               'method': 'simple',
+                                                               'dn': current_app.config.get('LDAP_BINDDN')},
                                                                'url': 'ldap://127.0.0.1:389'}],
                                                            kwargs={'base': current_app.config.get('LDAP_BASEDN'),
                                                                    'scope': 'subtree',
@@ -161,4 +186,4 @@ def account_detail(name):
             yaml2text = yaml.dump(text2yaml)
             salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
         salt.execution_command_minions(tgt='*', fun='state.apply', args='user')
-    return render_template('ldap/account_detail.html', form=form)
+    return render_template('ldap/account_edit.html', form=form)
