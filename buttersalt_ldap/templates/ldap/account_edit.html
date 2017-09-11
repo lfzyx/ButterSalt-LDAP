@@ -9,12 +9,33 @@
     {{ form.hidden_tag() }}
     <div class="form-group  required">
         {{ form.ou.label(class="control-label") }}
-        {{ form.ou(class="form-control", placeholder="Required") }}
+        {{ form.ou(class="form-control") }}
     </div>
     <div class="form-group" >
         <label class="control-label" for="o">组 (可填)</label>
         <input class="form-control" id="o" name="o" type="text" value={{default_o}}></input>
     </div>
+    {% if form.userPassword0.errors %}
+    <div class="form-group ">
+        {{ form.userPassword0.label(class="control-label") }}
+        {{ form.userPassword0(class="form-control") }}
+        <p class="help-block">{% for error in form.userPassword0.errors %}{{ error }}{% endfor %}</p>
+        {{ form.userPassword1.label(class="control-label") }}
+        {{ form.userPassword1(class="form-control") }}
+    </div>
+    {% elif form.userPassword1.errors %}
+        {{ form.userPassword0.label(class="control-label") }}
+        {{ form.userPassword0(class="form-control") }}
+        {{ form.userPassword1.label(class="control-label") }}
+        {{ form.userPassword1(class="form-control") }}
+        <p class="help-block">{% for error in form.userPassword1.errors %}{{ error }}{% endfor %}</p>
+
+    {% else %}
+        {{ form.userPassword0.label(class="control-label") }}
+        {{ form.userPassword0(class="form-control") }}
+        {{ form.userPassword1.label(class="control-label") }}
+        {{ form.userPassword1(class="form-control") }}
+    {% endif %}
     <div class="form-group" >
         <label class="control-label" for="key">Key (可填)</label>
         <textarea class="form-control" id="key" name="key" rows="15">{{default_key}}</textarea>

@@ -36,9 +36,12 @@ class LdapAccount(FlaskForm):
 class LdapAccountEdit(FlaskForm):
     ou = SelectField('部门')
     o = StringField('组 (可填)', validators=[Optional()])
-    userPassword0 = PasswordField('密码', validators=[InputRequired('密码是必须的'),
-                                                    EqualTo('userPassword1', message='密码必须相同.')])
-    userPassword1 = PasswordField('验证密码', validators=[InputRequired('验证密码是必须的')])
+    userPassword0 = PasswordField('密码', validators=[Optional(),
+                                                    EqualTo('userPassword1', message='密码必须相同.')],
+                                  render_kw={"placeholder": "**********"})
+    userPassword1 = PasswordField('验证密码', validators=[Optional(),
+                                                    EqualTo('userPassword0', message='密码必须相同.')],
+                                  render_kw={"placeholder": "**********"})
     key = TextAreaField('Key (可填)', validators=[Optional()],
                         render_kw={"placeholder": "Begins with 'ssh-rsa', 'ssh-dss', 'ssh-ed25519', 'ecdsa-sha2-nistp25"
                                                   "6', 'ecdsa-sha2-nistp384', or 'ecdsa-sha2-nistp521'", "rows": "15"})
@@ -140,11 +143,26 @@ def account_edit(name):
     except:
         default_key = ''
 
-    LdapAccountEdit.ou = SelectField('部门', default=default_ou)
+    LdapAccountEdit.ou = SelectField('部门', choices=ou_list, default=default_ou)
     form = LdapAccountEdit()
-    form.ou.choices = ou_list
 
     if form.validate_on_submit():
+
+        def makessha(password):
+            salt = os.urandom(4)
+            h = hashlib.sha1(password.encode())
+            h.update(salt)
+            return "{SSHA}" + encodebytes(h.digest() + salt).decode()[:-1]
+
+        ldap3.modify(dn=list(account.keys())[0], op='replace', attr='ou', vals=form.ou.data)
+        if form.userPassword0.data:
+            userpassword = makessha(form.userPassword0.data)
+            ldap3.modify(dn=list(account.keys())[0], op='replace', attr='userPassword',vals=userpassword)
+        if form.key.data:
+            ldap3.modify(dn=list(account.keys())[0], op='replace', attr='userPKCS12', vals=form.key.data)
+        if form.o.data:
+            ldap3.modify(dn=list(account.keys())[0], op='replace', attr='o', vals=form.o.data)
+
         minion_absent_list = set(minion_list) - set(form.minion.data)
         for minion_absent in minion_absent_list:
             text = salt.read_pillar_file('user/%s.sls' % (minion_absent,)).get('return')[0].get(
@@ -160,14 +178,12 @@ def account_edit(name):
             text = salt.read_pillar_file('user/%s.sls' % (minion,)).get('return')[0].get(
                 '/srv/pillar/user/%s.sls' % (minion,))
             text2yaml = yaml.load(text)
-            account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
-            cn = list(account.values())[0].get('cn')[0]
-            ou = list(account.values())[0].get('ou')[0]
             text2yaml.get('users').update(
-                {name: {'shell': '/bin/bash', 'fullname': cn, 'name': cn, 'groups': ou}})
+                {name: {'shell': '/bin/bash', 'fullname': name, 'name': name, 'groups': [form.ou.data]}})
             yaml2text = yaml.dump(text2yaml)
             salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
         salt.execution_command_minions(tgt='*', fun='state.apply', args='user')
+        return redirect(url_for('ldap.account_detail', name=name))
     return render_template('ldap/account_edit.html', form=form, default_o=default_o, default_key=default_key)
 
 

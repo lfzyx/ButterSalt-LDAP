@@ -21,17 +21,23 @@ class Ldap3(object):
                                                   'filterstr': filterstr, }).get(current_app.config.get('LDAP_SERVER'))
         return data
 
-    def add(self, cn=None, ou=None, o=None, userpassword=None, mail=None, key=None):
+    def add(self, cn=None, ou=None, o=[None], userpassword=None, mail=None, key=[None]):
         data = salt.execution_command_low(tgt=self.tgt, fun='ldap3.add',
                                           args=[self.connect],
                                           kwargs={'dn': 'cn=%s,ou=%s,%s' %
                                                         (cn, ou, current_app.config.get('LDAP_BASEDN')),
                                                   'attributes': {'userPassword':  [userpassword],
                                                                  'sn': [cn], 'mail': [mail],
-                                                                 'ou': [ou], 'o': [o], 'userPKCS12': [key],
+                                                                 'ou': [ou], 'o': o, 'userPKCS12': key,
                                                                  'objectClass': ['inetOrgPerson',
                                                                                  'organizationalPerson',
                                                                                  'person', 'top']}})
+        return data
+
+    def modify(self, dn, op, attr, vals):
+        data = salt.execution_command_low(tgt=self.tgt, fun='ldap3.modify',
+                                          args=[self.connect],
+                                          kwargs={'dn': dn, 'directives': [(op, attr, [vals]) ] })
         return data
 
     def delete(self, dn):
