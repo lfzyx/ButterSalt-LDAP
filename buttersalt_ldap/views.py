@@ -3,19 +3,20 @@ import os
 import hashlib
 import yaml
 from base64 import encodebytes
-from flask import Blueprint, render_template, current_app, flash, redirect, url_for
+from flask import Blueprint, render_template, flash, redirect, url_for
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField, PasswordField, TextAreaField, SelectMultipleField, widgets, SelectField
-from wtforms.validators import InputRequired, Length, Email, Regexp, EqualTo, Optional
+from wtforms.validators import InputRequired, Length, Email, Regexp, EqualTo, Optional, DataRequired
 from flask_login import login_required
 from ButterSalt import salt
+from .ldap3 import Ldap3
 
 
 class LdapAccount(FlaskForm):
     cn = StringField('姓名拼音', validators=[InputRequired('姓名拼音是必须的'), Length(1, 64),
                                          Regexp('^[A-Za-z]*$', 0,
                                                 '姓名拼音只能包含拼音')], render_kw={"placeholder": "zhangsan"})
-    ou = SelectField('部门')
+    ou = SelectField('部门', validators=[DataRequired()], default=None)
 
     o = StringField('组 (可填)', validators=[Optional()])
 
@@ -32,7 +33,15 @@ class LdapAccount(FlaskForm):
     submit = SubmitField('提交')
 
 
-class MinionAccess(FlaskForm):
+class LdapAccountEdit(FlaskForm):
+    ou = SelectField('部门')
+    o = StringField('组 (可填)', validators=[Optional()])
+    userPassword0 = PasswordField('密码', validators=[InputRequired('密码是必须的'),
+                                                    EqualTo('userPassword1', message='密码必须相同.')])
+    userPassword1 = PasswordField('验证密码', validators=[InputRequired('验证密码是必须的')])
+    key = TextAreaField('Key (可填)', validators=[Optional()],
+                        render_kw={"placeholder": "Begins with 'ssh-rsa', 'ssh-dss', 'ssh-ed25519', 'ecdsa-sha2-nistp25"
+                                                  "6', 'ecdsa-sha2-nistp384', or 'ecdsa-sha2-nistp521'", "rows": "15"})
     minion = SelectMultipleField('主机登陆授权')
     submit = SubmitField('提交')
 
@@ -43,16 +52,9 @@ ldap = Blueprint('ldap', __name__, url_prefix='/ldap', template_folder='template
 @ldap.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
-    account = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.search',
-                                         args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
-                                                         'method': 'simple',
-                                                         'dn': current_app.config.get('LDAP_BINDDN')},
-                                                'url': 'ldap://127.0.0.1:389'}],
-                                         kwargs={'base': current_app.config.get('LDAP_BASEDN'),
-                                                 'scope': 'subtree',
-                                                 'filterstr': '(objectClass=organizationalPerson)', })\
-        .get(current_app.config.get('LDAP_SERVER'))
-    return render_template('ldap/index.html', Data=account)
+    ldap3 = Ldap3()
+    accounts = ldap3.search(scope='subtree', filterstr='(objectClass=organizationalPerson)')
+    return render_template('ldap/index.html', Data=accounts)
 
 
 @ldap.route('/signup/', methods=['GET', 'POST'])
@@ -62,19 +64,10 @@ def signup():
 
     """
     form = LdapAccount()
-    ou_data = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.search',
-                                         args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
-                                                         'method': 'simple',
-                                                         'dn': current_app.config.get('LDAP_BINDDN')},
-                                                'url': 'ldap://127.0.0.1:389'}],
-                                         kwargs={'base': current_app.config.get('LDAP_BASEDN'),
-                                                 'scope': 'onelevel',
-                                                 'filterstr': '(objectClass=organizationalUnit)', })\
-        .get(current_app.config.get('LDAP_SERVER'))
-
-    ou_list = list()
-    for n in ou_data:
-        ou_list.append((ou_data.get(n).get('ou')[0], ou_data.get(n).get('ou')[0]))
+    ldap3 = Ldap3()
+    ou_data = ldap3.search(scope='onelevel', filterstr='(objectClass=organizationalUnit)')
+    ou_list = [(ou_data.get(n).get('ou')[0], ou_data.get(n).get('ou')[0]) for n in ou_data]
+    ou_list.append((None, ''))
     form.ou.choices = ou_list
     if form.validate_on_submit():
         def makessha(password):
@@ -88,19 +81,7 @@ def signup():
         mail = form.mail.data
         userpassword = makessha(form.userPassword0.data)
         key = form.key.data
-
-        salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.add',
-                                   args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
-                                                   'method': 'simple',
-                                                   'dn': current_app.config.get('LDAP_BINDDN')},
-                                          'url': 'ldap://127.0.0.1:389'}, ],
-                                   kwargs={'dn': 'cn=%s,ou=%s,%s' % (cn, ou, current_app.config.get('LDAP_BASEDN')),
-                                           'attributes': {'userPassword':  [userpassword],
-                                                          'sn': [cn], 'mail': [mail],
-                                                          'ou': [ou], 'o': [o], 'userPKCS12': [key],
-                                                          'objectClass': ['inetOrgPerson',
-                                                                          'organizationalPerson',
-                                                                          'person', 'top']}})
+        ldap3.add(cn=cn, ou=ou, o=o, userpassword=userpassword, mail=mail, key=key)
         flash('Signup successfully')
         return redirect(url_for('ldap.index'))
     return render_template('ldap/signup.html', form=form)
@@ -109,15 +90,8 @@ def signup():
 @ldap.route('/account/<name>', methods=['GET', 'POST'])
 @login_required
 def account_detail(name):
-    account = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'), fun='ldap3.search',
-                                         args=[{'bind': {'password': current_app.config.get('LDAP_BINDPW'),
-                                                         'method': 'simple',
-                                                         'dn': current_app.config.get('LDAP_BINDDN')},
-                                                'url': 'ldap://127.0.0.1:389'}],
-                                         kwargs={'base': current_app.config.get('LDAP_BASEDN'),
-                                                 'scope': 'subtree',
-                                                 'filterstr': '(cn=%s)' % (name,), }).get(
-                current_app.config.get('LDAP_SERVER'))
+    ldap3 = Ldap3()
+    account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
 
     minion_list = json.loads(salt.get_accepted_keys())
     belong_minion_list = list()
@@ -147,10 +121,28 @@ def account_edit(name):
         text2yaml = yaml.load(text)
         if name in text2yaml.get('users'):
             belong_minion_list.append(minion)
-    MinionAccess.minion = SelectMultipleField('主机登陆授权', option_widget=widgets.CheckboxInput(),
-                                              widget=widgets.ListWidget(prefix_label=False), choices=form_choices_list,
-                                              default=belong_minion_list)
-    form = MinionAccess()
+    LdapAccountEdit.minion = SelectMultipleField('主机登陆授权', option_widget=widgets.CheckboxInput(),
+                                                 widget=widgets.ListWidget(prefix_label=False),
+                                                 choices=form_choices_list,
+                                                 default=belong_minion_list)
+
+    ldap3 = Ldap3()
+    ou_data = ldap3.search(scope='onelevel', filterstr='(objectClass=organizationalUnit)')
+    ou_list = [(ou_data.get(n).get('ou')[0], ou_data.get(n).get('ou')[0]) for n in ou_data]
+    account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
+    default_ou = list(account.values())[0].get('ou')[0]
+    try:
+        default_o = list(account.values())[0].get('o')[0]
+    except:
+        default_o = ''
+    try:
+        default_key = list(account.values())[0].get('userPKCS12')[0]
+    except:
+        default_key = ''
+
+    LdapAccountEdit.ou = SelectField('部门', default=default_ou)
+    form = LdapAccountEdit()
+    form.ou.choices = ou_list
 
     if form.validate_on_submit():
         minion_absent_list = set(minion_list) - set(form.minion.data)
@@ -168,22 +160,21 @@ def account_edit(name):
             text = salt.read_pillar_file('user/%s.sls' % (minion,)).get('return')[0].get(
                 '/srv/pillar/user/%s.sls' % (minion,))
             text2yaml = yaml.load(text)
-            account_ldap_data = salt.execution_command_low(tgt=current_app.config.get('LDAP_SERVER'),
-                                                           fun='ldap3.search',
-                                                           args=[{'bind': {'password': current_app.config.get(
-                                                               'LDAP_BINDPW'),
-                                                               'method': 'simple',
-                                                               'dn': current_app.config.get('LDAP_BINDDN')},
-                                                               'url': 'ldap://127.0.0.1:389'}],
-                                                           kwargs={'base': current_app.config.get('LDAP_BASEDN'),
-                                                                   'scope': 'subtree',
-                                                                   'filterstr': '(cn=%s)' % (name,), }).get(
-                current_app.config.get('LDAP_SERVER'))
-            cn = list(account_ldap_data.values())[0].get('cn')
-            ou = list(account_ldap_data.values())[0].get('ou')
+            account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
+            cn = list(account.values())[0].get('cn')[0]
+            ou = list(account.values())[0].get('ou')[0]
             text2yaml.get('users').update(
-                {name: {'shell': '/bin/bash', 'fullname': cn[0], 'name': cn[0], 'groups': ou}})
+                {name: {'shell': '/bin/bash', 'fullname': cn, 'name': cn, 'groups': ou}})
             yaml2text = yaml.dump(text2yaml)
             salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
         salt.execution_command_minions(tgt='*', fun='state.apply', args='user')
-    return render_template('ldap/account_edit.html', form=form)
+    return render_template('ldap/account_edit.html', form=form, default_o=default_o, default_key=default_key)
+
+
+@ldap.route('/account/<name>/delete', methods=['GET', 'POST'])
+@login_required
+def account_delete(name):
+    ldap3 = Ldap3()
+    account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
+    ldap3.delete(dn=list(account.keys())[0])
+    return redirect(url_for('ldap.index'))

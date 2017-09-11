@@ -7,6 +7,18 @@
 
 <form action="" method="post"  class="form" role="form">
     {{ form.hidden_tag() }}
+    <div class="form-group  required">
+        {{ form.ou.label(class="control-label") }}
+        {{ form.ou(class="form-control", placeholder="Required") }}
+    </div>
+    <div class="form-group" >
+        <label class="control-label" for="o">组 (可填)</label>
+        <input class="form-control" id="o" name="o" type="text" value={{default_o}}></input>
+    </div>
+    <div class="form-group" >
+        <label class="control-label" for="key">Key (可填)</label>
+        <textarea class="form-control" id="key" name="key" rows="15">{{default_key}}</textarea>
+    </div>
     {{ form.minion.label(class="checkbox") }}
     {{ form.minion() }}
     {{ form.submit(class="btn btn-default") }}
