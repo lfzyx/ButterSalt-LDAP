@@ -182,6 +182,8 @@ def account_edit(name):
                 {name: {'shell': '/bin/bash', 'fullname': name, 'name': name, 'groups': [form.ou.data]}})
             yaml2text = yaml.dump(text2yaml)
             salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
+            salt.execution_command_minions(tgt=minion, fun='ssh.set_auth_key', kwargs={'user':name, 'key':form.key.data.split()[1]})
+
         salt.execution_command_minions(tgt='*', fun='state.apply', args='user')
         return redirect(url_for('ldap.account_detail', name=name))
     return render_template('ldap/account_edit.html', form=form, default_o=default_o, default_key=default_key)
@@ -193,4 +195,14 @@ def account_delete(name):
     ldap3 = Ldap3()
     account = ldap3.search(scope='subtree', filterstr='(cn=%s)' % (name,))
     ldap3.delete(dn=list(account.keys())[0])
+    minion_list = json.loads(salt.get_accepted_keys())
+    for minion in minion_list:
+        text = salt.read_pillar_file('user/%s.sls' % (minion,)).get('return')[0].get(
+            '/srv/pillar/user/%s.sls' % (minion,))
+        text2yaml = yaml.load(text)
+        if name in text2yaml.get('users'):
+            text2yaml.get('users').pop(name)
+            yaml2text = yaml.dump(text2yaml)
+            salt.write_pillar_file(yaml2text, 'user/%s.sls' % (minion,))
+            salt.execution_command_low(tgt=minion, fun='user.delete', args=[name])
     return redirect(url_for('ldap.index'))
