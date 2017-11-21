@@ -21,7 +21,16 @@ class Ldap3(object):
                                                   'filterstr': filterstr, }).get(current_app.config.get('LDAP_SERVER'))
         return data
 
-    def add(self, cn=None, ou=None, o=[None], userpassword=None, mail=None, key=[None]):
+    def add(self, cn=None, ou=None, o=None, userpassword=None, mail=None, key=None):
+        if o == '':
+            o = []
+        else:
+            o = [o]
+        if key == '':
+            key = []
+        else:
+            key = [key]
+
         data = salt.execution_command_low(tgt=self.tgt, fun='ldap3.add',
                                           args=[self.connect],
                                           kwargs={'dn': 'cn=%s,ou=%s,%s' %
